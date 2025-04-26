@@ -306,9 +306,9 @@ private:
 			int penalty = 0;
 			if (raw.contains("/x/") || raw.contains("/x-"))
 				penalty += 1000;
-			if (raw.iendswith(".png") || raw.iendswith(".jpg"))
+			if (raw.iendswith(".png") || raw.iendswith(".jpg") || raw.iendswith(".gif") || raw.iendswith(".bmp"))
 				penalty += 1000;
-			if (raw.iendswith(".txt") || raw.iendswith(".pdf"))
+			if (raw.iendswith(".txt") || raw.iendswith(".pdf") || raw.iendswith(".rtf"))
 				penalty += 1000;
 			if (raw.iendswith(".db") || raw.iendswith(".ini"))
 				penalty += 1000;
@@ -318,7 +318,9 @@ private:
 				penalty += 1000;
 			if (raw.iendswith(".htm") || raw.iendswith(".html") || raw.iendswith(".url") || raw.iendswith(".nfo"))
 				penalty += 1000;
-			if (raw.iendswith(".mid"))
+			if (raw.iendswith(".csv") || raw.iendswith(".xlsx"))
+				penalty += 1000;
+			if (raw.iendswith(".mid")) // these are music, but they require soundfont and otherwise act weird
 				penalty += 1000;
 			base_penalty = penalty;
 		}
@@ -1069,7 +1071,7 @@ int main(int argc, char** argv)
 	//  which works badly with Arlib sources being oneshot and O(1) to allocate
 	// (it's doable, but pointless. It's easier to just put everything in GLib, it's not like there's many)
 	
-	if (argv[1] && (cstring)argv[1] == "--local")
+	if (argv[1] && ((cstring)argv[1] == "--local" || (cstring)argv[1] == "-l"))
 	{
 		make_gui(NULL);
 		char** arg = argv+2;

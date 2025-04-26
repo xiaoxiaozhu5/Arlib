@@ -481,20 +481,20 @@ array<cstring> cstring::csplit(const regex& rx, size_t limit) const
 	const char * at = ptr_raw();
 	const char * end = ptr_raw_end();
 	
-	bool force_next = false;
-	while (ret.size() < limit && at < end)
+	bool require_nonempty = true;
+	while (ret.size() < limit)
 	{
-		auto m = rx.search(start, at + force_next, end);
+		auto m = rx.search<1>(start, at, end, at+require_nonempty);
 		if (m)
 		{
-			if (ret || m[0].end > at)
-				ret.append(arrayview<char>(at, m[0].start-at));
-			force_next = (m[0].start == m[0].end);
+			ret.append(arrayview<char>(at, m[0].start-at));
+			require_nonempty = (m[0].start == m[0].end);
 			at = m[0].end;
 		}
 		else break;
 	}
-	ret.append(arrayview<char>(at, end-at));
+	if (!ret || at != end || !require_nonempty)
+		ret.append(arrayview<char>(at, end-at));
 	return ret;
 }
 

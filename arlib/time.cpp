@@ -60,13 +60,13 @@ inline uint64_t div24000(uint64_t val)
 #endif
 }
 
-uint64_t timer::get_counter()
+uint64_t timer::get_raw()
 {
 	LARGE_INTEGER timer_now;
 	QueryPerformanceCounter(&timer_now);
 	return timer_now.QuadPart;
 }
-uint64_t timer::to_us(uint64_t count)
+uint64_t timer::raw_to_us(uint64_t count)
 {
 #ifdef __x86_64__
 	// according to values in https://github.com/microsoft/STL/blob/main/stl/inc/__msvc_chrono.hpp
@@ -81,7 +81,7 @@ uint64_t timer::to_us(uint64_t count)
 #endif
 	return muldiv64(count, 1000000, timer_freq.QuadPart);
 }
-uint64_t timer::to_ms(uint64_t count)
+uint64_t timer::raw_to_ms(uint64_t count)
 {
 #ifdef __x86_64__
 	if (LIKELY(timer_freq.QuadPart == 10000000))
@@ -92,6 +92,18 @@ uint64_t timer::to_ms(uint64_t count)
 		return div24000(count);
 #endif
 	return muldiv64(count, 1000, timer_freq.QuadPart);
+}
+uint64_t timer::us_to_raw(uint64_t us)
+{
+#ifdef __x86_64__
+	if (LIKELY(timer_freq.QuadPart == 10000000))
+		return count*10;
+#endif
+#ifdef __aarch64__
+	if (LIKELY(timer_freq.QuadPart == 24000000))
+		return count*24;
+#endif
+	return muldiv64(count, timer_freq.QuadPart, 1000000);
 }
 
 #define WINDOWS_TICK 10000000
@@ -215,7 +227,7 @@ timestamp timestamp::from_iso8601(cstring stamp)
 	tm.tm_year -= 1900;
 	tm.tm_mon -= 1;
 	ptr += nano;
-	return { timegm(&tm), parse_nanos(ptr, end) };
+	return { timegm(&tm), (long)parse_nanos(ptr, end) };
 }
 
 #include "test.h"

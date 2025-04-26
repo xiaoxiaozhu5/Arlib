@@ -8,6 +8,10 @@
 
 template<typename T, typename Thasher = void>
 class set {
+	void assertions()
+	{
+		static_assert(!std::is_base_of_v<nomove, T>);
+	}
 	template<typename,typename,typename>
 	friend class map;
 	
@@ -52,7 +56,7 @@ class set {
 		T* prev_data = m_data;
 		bitarray prev_valid = std::move(m_valid);
 		
-		m_data = xcalloc(newsize, sizeof(T));
+		m_data = xcalloc(newsize, sizeof(T)); // don't optimize to malloc, tag bytes need to be zero
 		static_assert(sizeof(T) >= 1); // otherwise the tags mess up (zero-size objects are useless in sets, 
 		m_valid.reset();               // and I'm not sure if they're expressible in standard C++, but no reason not to check)
 		m_valid.resize(newsize);
@@ -109,7 +113,10 @@ class set {
 	{
 		if (!m_data) return -1;
 		
-		size_t hashv = hash_shuffle(local_hash<T2>(item));
+		// an integer mixer takes a sequential series of integers and returns a random-looking sequence
+		// a counter-based RNG takes a sequential series of integers and returns a random-looking sequence
+		// let's just use one as the other
+		size_t hashv = random_t::oracle32(local_hash<T2>(item));
 		size_t i = 0;
 		
 		size_t emptyslot = -1;
@@ -119,9 +126,9 @@ class set {
 			//some hashsets use hashv + i+(i+1)/2 <http://stackoverflow.com/a/15770445>
 			//but that only helps on poor hash functions, which mine is not
 			size_t pos = (hashv + i) & (m_valid.size()-1);
-			if (want_used && m_valid[pos] && m_data[pos] == item)
+			if (want_used && m_valid.get(pos) && m_data[pos] == item)
 				return pos;
-			if (!m_valid[pos])
+			if (!m_valid.get(pos))
 			{
 				if (emptyslot == (size_t)-1) emptyslot = pos;
 				if (tag(pos) == i_empty)
@@ -131,7 +138,6 @@ class set {
 				}
 			}
 			i++;
-//if(i > m_valid.size()) *(char*)1=1;
 		}
 	}
 	
@@ -165,14 +171,14 @@ class set {
 		
 		size_t pos = known_new ? 0 : find_pos_insert(item);
 		
-		if (known_new || !m_valid[pos])
+		if (known_new || !m_valid.get(pos))
 		{
 			if (grow())
 				pos = find_pos_insert(item); // recalculate this if grow() moved it
 			//do not move grow() earlier; it invalidates references, get_create(item_that_exists) is not allowed to do that
 			
 			if (tag(pos) == i_empty) m_used_slots++;
-			m_valid[pos] = true;
+			m_valid.set(pos, true);
 			m_count++;
 			return { true, &m_data[pos] };
 		}
@@ -375,6 +381,11 @@ public:
 
 template<typename Tkey, typename Tvalue, typename Thasher = void>
 class map {
+	void assertions()
+	{
+		static_assert(!std::is_base_of_v<nomove, Tkey>);
+		static_assert(!std::is_base_of_v<nomove, Tvalue>);
+	}
 public:
 	struct node {
 		const Tkey key;

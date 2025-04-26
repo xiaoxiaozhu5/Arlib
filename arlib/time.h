@@ -78,7 +78,7 @@ struct timestamp {
 	static timestamp now()
 	{
 // TODO: remove this ifdef when dropping the offending compilers
-#if (defined(__clang_major__) && __clang_major__ >= 18) || (!defined(__clang_major__) && defined(__GNUC__) && __GNUC__ >= 12)
+#if (defined(__clang_major__) && __clang_major__ >= 19) || (!defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 12)
 		static_assert(std::is_layout_compatible_v<struct timespec, timestamp>);
 #endif
 		timestamp ret;

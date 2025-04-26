@@ -6,7 +6,6 @@
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <linux/sched.h>
-#include <linux/wait.h>
 
 bool process::set_fds(arrayvieww<int> fds, bool cloexec)
 {
@@ -102,9 +101,7 @@ process::strict_bool process::create(raw_params& param)
 bool process::process_try_wait(fd_t& fd, int& ret, bool async)
 {
 	siginfo_t si;
-	si.si_pid = 0; // unnecessary on Linux, needed on other Unix
-	// todo: delete cast, and include of <linux/wait.h>, when dropping ubuntu 22.04
-	waitid((idtype_t)P_PIDFD, (int)fd, &si, WEXITED|WSTOPPED|WCONTINUED|(async?WNOHANG:0));
+	waitid(P_PIDFD, (int)fd, &si, WEXITED|WSTOPPED|WCONTINUED|(async?WNOHANG:0));
 	if (si.si_pid != 0 && (si.si_code == CLD_EXITED || si.si_code == CLD_DUMPED || si.si_code == CLD_KILLED))
 	{
 		fd.close();

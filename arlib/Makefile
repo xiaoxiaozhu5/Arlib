@@ -427,11 +427,9 @@ TRUE_CFLAGS := -std=c11 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # - bool std::is_pointer_in_range(T* first, T* last, T* ptr) - returns whether ptr is in the range first..last, but without UB if it isn't
 #     (still UB if first..last is not a valid range, or if ptr is unaligned or something)
 #     behavior (including amount of UB) is identical to while (first != last) { if (ptr == first) return true; first++; } return false;
+# - public const variables (class members can read and write them; external code can read, but not write, as if it's const)
 
 # C++20 features I should investigate using more of:
-# - Template string literals (for the regex parser)
-# - Concepts (also for the regex parser, the errors are absurd)
-# - consteval (still for the regex parser, that template mess is terrible)
 # - Down with typename http://wg21.link/p0634r3
 # - [[likely]]
 # - [[no_unique_address]]

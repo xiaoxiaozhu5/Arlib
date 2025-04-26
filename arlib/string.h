@@ -229,7 +229,7 @@ public:
 	
 	bool contains(cstring other) const
 	{
-		return memmem(this->ptr(), this->length(), other.ptr(), other.length()) != NULL;
+		return memmem(this->ptr(), this->length(), other.ptr(), other.length()) != nullptr;
 	}
 	size_t indexof(cstring other, size_t start = 0) const; // Returns -1 if not found.
 	size_t lastindexof(cstring other) const;
@@ -405,9 +405,6 @@ public:
 		else
 			return cstring::equal_large(left, right);
 	}
-	friend inline bool operator!=(const cstring& left, const char * right  ) { return !operator==(left, right); }
-	friend inline bool operator!=(const cstring& left, const cstring& right) { return !operator==(left, right); }
-	friend inline bool operator!=(const char * left,   const cstring& right) { return !operator==(left, right); }
 	
 	friend bool operator<(cstring left,      const char * right) = delete;
 	friend bool operator<(cstring left,      cstring right     ) = delete;
@@ -456,11 +453,7 @@ class string : public cstrnul {
 	forceinline const uint8_t * ptr() const { return cstring::ptr(); }
 	void resize(size_t newlen);
 	
-	void init_from(const char * str)
-	{
-		//if (!str) str = "";
-		init_from((uint8_t*)str, strlen(str));
-	}
+	void init_from(const char * str) { init_from((uint8_t*)str, strlen(str)); }
 	forceinline void init_from(const uint8_t * str, size_t len)
 	{
 		if (__builtin_constant_p(len))

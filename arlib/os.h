@@ -1,6 +1,12 @@
 #pragma once
 #include "global.h"
 #include <time.h>
+#ifdef __linux__
+#include "file.h"
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#endif
 // This is basically a grab-bag of assorted rarely used tools.
 
 #if defined(_WIN32)
@@ -12,7 +18,7 @@
 #ifdef __i386__
 // needs some extra shenanigans to kill the stdcall @12 suffix
 #define DLLEXPORT_STDCALL(ret, name, args) \
-	__asm__(".section .drectve; .ascii \" -export:" #name "\"; .text"); \
+	__asm__(".pushsection .drectve; .ascii \" -export:" #name "\"; .popsection"); \
 	extern "C" ret __stdcall name args __asm__("_" #name); \
 	extern "C" ret __stdcall name args
 #else
@@ -127,89 +133,157 @@ void debug_install_crash_handler(); // Calls debug_fatal_stack() if a fatal sign
 class timer {
 	uint64_t start; // If the performance counter counts nanoseconds, this will take about 584 years to overflow.
 	
+public:
 #ifdef __unix__
-	static uint64_t get_counter()
+	static forceinline uint64_t get_raw()
 	{
 		struct timespec tp;
 		clock_gettime(CLOCK_MONOTONIC, &tp); // CLOCK_MONOTONIC_RAW makes more sense per docs, but just about everything recommends MONOTONIC
 		return (uint64_t)tp.tv_sec*(uint64_t)1000000000 + tp.tv_nsec; // even vdso - it implements MONOTONIC, but not M_RAW
 	}
-	static uint64_t to_us(uint64_t count) { return count/1000; }
-	static uint64_t to_ms(uint64_t count) { return count/1000000; }
+	static uint64_t us_to_raw(uint64_t us) { return us*1000; }
+	static uint64_t raw_to_us(uint64_t count) { return count/1000; }
+	static uint64_t raw_to_ms(uint64_t count) { return count/1000000; }
 #else
-	static uint64_t get_counter();
-	static uint64_t to_us(uint64_t count);
-	static uint64_t to_ms(uint64_t count);
+	static uint64_t get_raw();
+	static uint64_t raw_to_us(uint64_t count);
+	static uint64_t raw_to_ms(uint64_t count);
+	static uint64_t us_to_raw(uint64_t us);
 #endif
 	
-	uint64_t counter() { return get_counter() - start; }
+private:
+	uint64_t counter() { return get_raw() - start; }
 	uint64_t counter_reset()
 	{
 		uint64_t prev = start;
-		start = get_counter();
+		start = get_raw();
 		return start - prev;
 	}
 	
 public:
 	timer() { reset(); }
-	void reset() { start = get_counter(); }
-	uint64_t us() { return to_us(counter()); }
-	uint64_t ms() { return to_ms(counter()); }
-	uint64_t us_reset() { return to_us(counter_reset()); }
-	uint64_t ms_reset() { return to_ms(counter_reset()); }
+	void reset() { start = get_raw(); }
+	uint64_t us() { return raw_to_us(counter()); }
+	uint64_t ms() { return raw_to_ms(counter()); }
+	uint64_t us_reset() { return raw_to_us(counter_reset()); }
+	uint64_t ms_reset() { return raw_to_ms(counter_reset()); }
 };
 
 class benchmark {
-	timer t;
+	uint64_t timer_start;
+	uint64_t timer_stop;
+public:
+	uint64_t iterations;
+private:
 	
 	bool next_cycle()
 	{
-		uint32_t us_actual = t.us();
-		if (us_actual > us)
+		uint64_t t = timer::get_raw();
+		if (t > timer_stop)
 		{
-			us = us_actual;
+			timer_stop = t;
 			return false;
 		}
 		return true;
 	}
 	
 public:
-	uint32_t iterations = 0; // Callers are allowed to read, but not write, these two.
-	uint32_t us = 500000;
 	
-	benchmark() {}
-	benchmark(uint32_t us) : us(us) {}
+	benchmark() { reset(); }
+	benchmark(uint32_t us) { reset(us); }
 	
 	forceinline operator bool()
 	{
 		iterations++;
-		if (!(iterations & (iterations-1))) // for really fast-running things, fetching the time is a bottleneck; do it rarely
+		if (UNLIKELY(!(iterations & (iterations-1)))) // for really fast-running things, fetching the time is a bottleneck; do it rarely
 		{
-			return next_cycle();
+			if (!next_cycle())
+				return false;
 		}
 		return true;
 	}
 	
 	double per_second()
 	{
-		return (double)iterations * 1000000 / us;
+		return (double)iterations * 1000000 / timer::raw_to_us(timer_stop - timer_start);
 	}
 	
 	void reset(uint32_t new_us = 500000)
 	{
-		iterations = 0;
-		us = new_us;
-		t.reset();
+		iterations = -1; // since the last operator bool() increments the iteration count but does not enter the loop body
+		timer_start = timer::get_raw();
+		timer_stop = timer_start + timer::us_to_raw(new_us);
 	}
 	
 	// This is mostly the same as the global launder function, but guarantees that the input is
 	//  computed for every iteration and not optimized out. A function call is a sufficient compiler
-	//  barrier most of the time, but it's available if needed.
+	//  barrier most of the time, but it's available if needed (for example if the function got inlined).
 	template<typename T> static T launder(T v)
 	{
 		__asm__ volatile("" : "+g"(v));
 		return v;
 	}
+};
+
+// An instruction counter, well, counts the number of instructions executed by the calling thread since object creation.
+// While actual time spent is the measure you'd actually want to optimize, it's a very noisy number, affected by system load,
+//   system load a second ago (affects current cpu frequency), CPU model, scheduler whims,
+//   kernel state (mmap takes different time depending on how much RAM is free/cached/whatever), and just about everything else.
+// The instruction counter is much more stable; not perfect, but around one part per million if running the same program twice.
+//   (The remaining noise is probably mostly due to ASLR messing with malloc, or foreign threads causing mutex spinning or something.)
+// Can return zero, if the operation isn't supported on this OS or hardware (for example, Intel e-cores don't support them).
+// Zero itself is not a possible return value if the object is functional, since fetching the counter takes a few instructions.
+// Do not use this object together with the benchmark object - its number of iterations can vary by factors of two.
+// (It is, however, okay to divide instruction count with benchmark's iteration count.)
+class insn_counter {
+#ifdef __linux__
+	fd_t fd;
+	
+	static int perf_event_open(const struct perf_event_attr * hw_event, pid_t pid, int cpu, int group_fd, unsigned long flags)
+	{
+		return syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
+	}
+public:
+	insn_counter()
+	{
+		struct perf_event_attr pe = {
+			.type = PERF_TYPE_HARDWARE,
+			.size = sizeof(pe),
+			.config = PERF_COUNT_HW_INSTRUCTIONS,
+			.exclude_kernel = true,
+			.exclude_hv = true,
+			.exclude_idle = true, // not sure what instruction count while idle means, but let's omit it
+		};
+		fd = perf_event_open(&pe, 0, -1, -1, PERF_FLAG_FD_CLOEXEC);
+	}
+	operator bool() { return fd.valid(); }
+	
+	uint64_t get()
+	{
+		// https://man7.org/linux/man-pages/man2/perf_event_open.2.html cap_user_rdpmc contains an example of skipping the read() syscall
+		// but it's incomplete (missing setup, refers to undefined functions), uses the deprecated cap_usr_time name,
+		// doesn't mention how it interacts with cpu migration, and contains a seqlock that means a potentially-noisy race condition
+		// let's just stick to plain old reads
+		uint64_t ret = 0;
+		read(fd, &ret, sizeof(ret)); // if perf_event_open fails, read(-1, ...) will leave the buffer unchanged at zero
+		return ret;
+	}
+	
+	// Or you can just subtract the previous get() return value.
+	void reset()
+	{
+		ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+	}
+#else
+public:
+	// the windows equivalent is EnableThreadProfiling()
+	// but the documentation is awful, and googling it suggests it doesn't work at all
+	// (perf_event_open's docs are a rambly infodump with way too few examples, but at least there is some information)
+	insn_counter() {}
+	operator bool() { return false; }
+	uint64_t get() { return 0; }
+	void reset() {}
+#endif
 };
 
 #ifdef _WIN32

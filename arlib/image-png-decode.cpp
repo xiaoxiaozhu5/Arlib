@@ -5,7 +5,7 @@
 #include "deflate.h"
 #include "endian.h"
 
-#ifndef END_LITTLE
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 #error todo: fix endian assumptions
 #endif
 
@@ -375,11 +375,11 @@ goto fail;
 		
 		uint32_t nbytes = ((uint64_t)width*bpp_in+7)/8;
 		
-	#ifdef __SSE2__
+#ifdef __SSE2__
 		__m128i bpp1_bit0 = _mm_set1_epi32(palette[0]); // hoist those (gcc won't automatically, can't prove height/nbytes != 0)
 		__m128i bpp1_bitxor = _mm_set1_epi32(palette[0]^palette[1]);
 		uint64_t bpp1_fanout_magic = 0x8040201008040201; // no clue know why this isn't hoisted though
-	#endif
+#endif
 		uint8_t bpp1_max_bits = 0;
 		
 		for (uint32_t y=0;y<height;y++)
@@ -391,13 +391,13 @@ goto fail;
 			for (uint32_t byte=0;byte<nbytes;byte++)
 			{
 				uint8_t packed = source[byte];
-	#define  WRITE(xs, idx)  pixels[byte*8/bpp_in + (size_t)(xs)] = palette[(idx)]
+#define WRITE(xs, idx) pixels[byte*8/bpp_in + (size_t)(xs)] = palette[(idx)]
 				
 				if (bpp_in == 1)
 				{
 					bpp1_max_bits |= packed;
 					
-	#ifdef __SSE2__
+#ifdef __SSE2__
 					uint64_t fanout = (uint64_t)packed * bpp1_fanout_magic; // expand bits of packed to 0x80 bits of 64bit reg
 					__m128i mask = _mm_cvtsi64_si128(fanout); // the other 56 bits of fanout are don't care terms
 					mask = _mm_unpacklo_epi8(mask, mask); // left term is don't care, use mask because _mm_undefined_si128() optimizes poorly
@@ -407,7 +407,7 @@ goto fail;
 						_mm_xor_si128(bpp1_bit0, _mm_and_si128(bpp1_bitxor, _mm_unpacklo_epi16(mask,mask))));
 					_mm_storeu_si128((__m128i*)(pixels+byte*8+4),
 						_mm_xor_si128(bpp1_bit0, _mm_and_si128(bpp1_bitxor, _mm_unpackhi_epi16(mask,mask))));
-	#else
+#else
 					WRITE(0, (packed>>7)&1);
 					WRITE(1, (packed>>6)&1);
 					WRITE(2, (packed>>5)&1);
@@ -416,7 +416,7 @@ goto fail;
 					WRITE(5, (packed>>2)&1);
 					WRITE(6, (packed>>1)&1);
 					WRITE(7, (packed>>0)&1);
-	#endif
+#endif
 				}
 				if (bpp_in == 2)
 				{
@@ -448,7 +448,7 @@ goto fail;
 					
 					WRITE(0, (packed>>0)&255);
 				}
-	#undef WRITE
+#undef WRITE
 			}
 			
 			pixels += width;
@@ -483,7 +483,7 @@ goto fail;
 				x = width;
 			}
 			
-	#ifdef __SSE2__
+#ifdef __SSE2__
 			if (color_type == 6)
 			{
 				while (x+3 < width)
@@ -498,7 +498,7 @@ goto fail;
 				}
 			}
 			SIMD_LOOP_TAIL
-	#endif
+#endif
 			
 			while (x < width)
 			{

@@ -109,7 +109,7 @@ static size_t n_free = 0;
 static int n_malloc_block = 0;
 void _test_malloc()
 {
-	if (UNLIKELY(n_malloc_block > 0))
+	if (UNLIKELY(n_malloc_block > 0) && result == err_ok) // don't throw if we've failed already, failures tend to screw up this variable
 	{
 		n_malloc_block = 0; // failing usually allocates
 		test_fail("can't malloc here");

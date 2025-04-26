@@ -14,17 +14,19 @@
 //   - Character class expressions [abc--b], [abc&&ace] (useless without \p)
 //   - Nesting anything in character sets [\q{abc}] (difficult to implement, near useless without \p)
 //   - Probably some more stuff, the spec is increasingly difficult to read
+// - \$ is legal (the JS 5.1 spec is typoed). In newer JS, \Z is legal and identity; unknown letters are error here.
 // - Illegal backreferences (backreferences that cannot be defined at this point) are errors, not synonyms for empty string.
 // - No exceptions, it just returns false.
 // - None of the C++ extensions. No regex traits, no named character classes, collation, or equivalence. [[:digit:]], [[.tilde.]], [[=a=]]
 // - None of the browser compatibility extensions; for example, {a} is an error, not literal chars.
 // - There may be bugs, of course. I can think of plenty of troublesome edge cases, and it's often difficult to determine the right answer.
+//     (Though I did find several bugs in the three std::regex, 
 
 // This is fundamentally a backtracking regex engine; as such, the usual caveats about catastrophic backtracking apply.
 // However, it optimizes what it can to NFAs, which reduces the asymptote for some regexes.
-// For example, (?:a+a+a+a+) will be processed in O(n), not O(n^4), and (?:)+ will be deleted;
+// For example, (?:a+a+a+a+) will be processed in O(n), not O(n^4);
 //    however, if there are capture groups or other things an NFA can't handle, it will fall back to backtracking.
-//    For example, ()+ will crash with a stack overflow.
+//    For example, (?:(a)+(a)+(a)+(a)+) will take O(n^4).
 
 // If you'd rather not compile the regex every time the expression is reached, you can call this instead.
 // This moves the initialization to before main().
@@ -43,20 +45,49 @@ class regex {
 		t_byte, // 'data' is index to bytes or dfas, respectively.
 		t_dfa_shortest, // Shortest match first.
 		t_dfa_longest,
+		t_dfa_longest_possessive, // Does not backtrack. Used only immediately before accept and lookahead completion.
 		
 		t_capture_start, // 'data' is the capture index. 0 is illegal.
 		t_capture_end, // If backtracked, undoes the update of the capture.
-		t_capture_discard, // Also undoes if backtracked. Used before | (so (?:(a)|b){2} + "ab" doesn't capture), and after (?!(a)) (it matched, no backtracking).
+		t_capture_discard, // Also undoes if backtracked. Used before |, so (?:(a)|b){2} + "ab" doesn't capture.
+		t_capture_discard_force, // Does not undo if backtracked. Used after (?!(a)) (it matched, no backtracking).
 		t_capture_backref, // Doesn't write the capture list, but still capture related, so it goes in this group.
+		t_ensure_progress, // Backtrack if current pointer equals start of the given capture index. Used to ensure optional repeats are nonempty.
 		
 		t_assert_boundary, // These don't use 'data'.
 		t_assert_notboundary,
 		t_assert_start,
 		t_assert_end,
 		
-		t_lookahead_positive, // Lookahead body is after this instruction, ending with t_accept. 'data' tells where to jump if successful.
-		t_lookahead_negative,
+		t_lookahead_positive, // Lookahead body is after this instruction, ending with the below.
+		t_lookahead_negative, // 'data' tells where to jump if successful.
+		t_lookahead_positive_complete, // These two don't use 'data'.
+		t_lookahead_negative_complete,
 	};
+	static bool is_alt(insntype_t type)
+	{
+		return type == t_alternative_first || type == t_alternative_second;
+	}
+	static bool is_dfa(insntype_t type)
+	{
+		return type == t_dfa_shortest || type == t_dfa_longest || type == t_dfa_longest_possessive;
+	}
+	static bool is_lookahead(insntype_t type)
+	{
+		return type == t_lookahead_positive || type == t_lookahead_negative;
+	}
+	static bool targets_another_insn(insntype_t type)
+	{
+		return is_alt(type) || is_lookahead(type) || type == t_jump;
+	}
+	static bool is_accept(insntype_t type)
+	{
+		return type == t_accept || type == t_lookahead_positive_complete || type == t_lookahead_negative_complete;
+	}
+	static bool is_terminator(insntype_t type)
+	{
+		return type == t_jump || is_accept(type);
+	}
 	struct insn_t {
 		insntype_t type;
 		uint32_t data;
@@ -73,10 +104,15 @@ class regex {
 		array<node_t> transitions;
 		uint32_t init_state; // either 0 or 0x80000000, depending on whether empty string matches
 		
+		bool operator==(const dfa_t&) const = default;
+		size_t hash() const { return hash_combiner::combine(arrayview_hasher::hash(transitions), ::hash(init_state)); }
+		
 		void dump() const;
 	};
 	
-	uint32_t num_captures;
+public:
+	uint32_t num_captures; // number of actual capture groups
+	uint32_t num_captures_capacity; // capture group capacity needed - extra capacity is needed to ensure optional repeats are nonempty
 	array<insn_t> insns;
 	array<bitset<256>> bytes; // Simply which bytes are legal at this position. Lots of things compile to this. (Most then become a DFA.)
 	array<dfa_t> dfas;
@@ -88,6 +124,7 @@ public:
 	regex() { set_fail(); }
 	regex(cstring rgx) { parse(rgx); }
 	bool parse(cstring rgx);
+	bool parse_unoptimized(cstring rgx); // Not recommended, exists mostly for testing and comparison purposes.
 	operator bool() const
 	{
 		return num_captures > 0; // a valid regex has at least the \0 capture, but the set_fail one doesn't
@@ -111,15 +148,6 @@ private:
 	}
 	
 	void optimize();
-	
-	static bool is_alt(insntype_t type)
-	{
-		return type == t_alternative_first || type == t_alternative_second;
-	}
-	static bool targets_another_insn(insntype_t type)
-	{
-		return is_alt(type) || type == t_jump || type == t_lookahead_positive || type == t_lookahead_negative;
-	}
 	
 	struct pair {
 		const char * start;
@@ -153,75 +181,36 @@ public:
 private:
 	class matcher;
 	
-	enum checktype_t {
-		ct_jump,
-		ct_dfa_shortest,
-		ct_dfa_longest,
-		ct_setcapture_start,
-		ct_setcapture_end,
-		ct_lookahead_pos,
-		ct_lookahead_neg,
-	};
-	struct checkpoint_t {
-		checktype_t ty;
-		uint32_t state;
-		const uint8_t * at;
-		size_t extra;
-	};
-	class my_stack {
-		array<checkpoint_t> data;
-		size_t size = 0;
-	public:
-		operator bool() { return size; }
-		void reset() { size = 0; }
-		forceinline checkpoint_t& pop() { return data[--size]; }
-		forceinline void push(checkpoint_t elem)
-		{
-			if (data.size() == size)
-				data.resize((data.size() | 16) * 2);
-			data[size++] = elem;
-		}
-	};
-	mutable my_stack checkpoints;
-	mutable bitarray dfa_matches;
-	
-	void match(pair* ret, const char * start, const char * at, const char * end) const;
-	void match_alloc(size_t num_captures, pair* ret, const char * start, const char * at, const char * end) const;
+	void match(pair* ret, size_t ret_len, const char * start, const char * at, const char * end, const char * min_match_end) const;
+	void search(pair* ret, size_t ret_len, const char * start, const char * at, const char * end, const char * min_match_end) const;
 	
 public:
-	// While these match functions are const, they make use of internal caches; this object is not thread safe.
-	
-	template<size_t n = 5> match_t<n> match(const char * start, const char * at, const char * end) const
+	template<size_t n = 5> match_t<n> match(const char * start, const char * at, const char * end, const char * min_match_end) const
 	{
 		match_t<n> ret {};
-		if (LIKELY(n >= this->num_captures))
-		{
-			ret.m_size = this->num_captures;
-			match(ret.group, start, at, end);
-		}
-		else
-		{
-			ret.m_size = n;
-			match_alloc(n, ret.group, start, at, end);
-		}
+		match(ret.group, n, start, at, end, min_match_end);
+		ret.m_size = min(n, this->num_captures);
 		return ret;
+	}
+	template<size_t n = 5> match_t<n> match(const char * start, const char * at, const char * end) const
+	{
+		return match<n>(start, at, end, at);
 	}
 	template<size_t n = 5> match_t<n> match(const char * start, const char * end) const { return match<n>(start, start, end); }
 	template<size_t n = 5> match_t<n> match(const char * str) const { return match<n>(str, str+strlen(str)); }
 	// funny type, to ensure it can't construct a temporary
 	template<size_t n = 5> match_t<n> match(cstring& str) const { return match<n>(str.ptr_raw(), str.ptr_raw_end()); }
 	
-	// search() is not recommended, it's slow.
+	template<size_t n = 5> match_t<n> search(const char * start, const char * at, const char * end, const char * min_match_end) const
+	{
+		match_t<n> ret {};
+		search(ret.group, n, start, at, end, min_match_end);
+		ret.m_size = min(n, this->num_captures);
+		return ret;
+	}
 	template<size_t n = 5> match_t<n> search(const char * start, const char * at, const char * end) const
 	{
-		while (at < end)
-		{
-			match_t<5> ret = match<n>(start, at, end);
-			if (ret)
-				return ret;
-			at++;
-		}
-		return {};
+		return search<n>(start, at, end, at);
 	}
 	template<size_t n = 5> match_t<n> search(const char * start, const char * end) const { return search<n>(start, start, end); }
 	template<size_t n = 5> match_t<n> search(const char * str) const { return search<n>(str, str+strlen(str)); }
@@ -290,6 +279,7 @@ public:
 	bool parse(cstring rgx);
 	operator bool() const { return unroll_count != 0; }
 	
+	// start argument is ignored, since ^ and \b are not supported in regex_search
 	const char * search(const char * start, const char * at, const char * end) const { return search(at, end); }
 	const char * search(const char * start, const char * end) const;
 	const char * search(const char * str) const { return search(str, str+strlen(str)); }

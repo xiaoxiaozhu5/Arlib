@@ -5,6 +5,11 @@
 #include "os.h"
 #endif
 
+// todo: consider rewriting this to a NFA/DFA based approach, like the regexes
+
+// alternatively https://en.wikipedia.org/wiki/Two-way_string-matching_algorithm
+// if I'm reading it correctly, it's faster in instruction count but does mem access in a random order
+
 #if defined(_WIN32) || defined(runtime__SSE4_2__) || defined(ARLIB_TEST)
 // Unlike musl and glibc, this program uses a rolling hash, not the twoway algorithm.
 // Twoway is sometimes faster, sometimes slower; average is roughly the same, and rolling has more predictable performance.

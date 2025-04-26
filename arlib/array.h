@@ -15,7 +15,7 @@ class cstring;
 //this object does not own its storage, it's just a pointer wrapper
 template<typename T> class arrayview {
 protected:
-	T * items = NULL; // not const, despite not necessarily being writable; this makes arrayvieww/array a lot simpler
+	T * items = nullptr; // not const, despite not necessarily being writable; this makes arrayvieww/array a lot simpler
 	size_t count = 0;
 	
 protected:
@@ -181,11 +181,6 @@ public:
 		}
 	}
 	
-	bool operator!=(arrayview<T> other) const
-	{
-		return !(*this == other);
-	}
-	
 	const T* begin() const { return this->items; }
 	const T* end() const { return this->items+this->count; }
 	
@@ -252,7 +247,7 @@ public:
 		this->count = other.count;
 	}
 	
-	arrayvieww<T> operator=(arrayvieww<T> other)
+	arrayvieww<T>& operator=(arrayvieww<T> other)
 	{
 		this->items = other.items;
 		this->count = other.count;
@@ -397,6 +392,8 @@ template<typename T> class array : public arrayvieww<T> {
 public:
 	static size_t capacity_for(size_t n)
 	{
+		static_assert(!std::is_base_of_v<nomove, T>);
+		
 		// don't allocate enough space for 1 entry, just go for 4 or 8 directly - fewer mallocs means faster
 		// TODO: are these numbers reasonable?
 		size_t min = (sizeof(T) <= 16 ? 8 : 4);
@@ -912,7 +909,7 @@ public:
 	{
 		return std::move(pop_ref());
 	}
-	bool empty()
+	bool empty() const
 	{
 		return rd == wr;
 	}
@@ -945,7 +942,7 @@ protected:
 	// the performance differences are small, but nonzero
 #define BITARRAY_ASM
 #endif
-	static constexpr bool get(const chunk_t * chunks, size_t n)
+	static forceinline constexpr bool get(const chunk_t * chunks, size_t n)
 	{
 		// todo: change to if not consteval when switching to c++23
 		if (!std::is_constant_evaluated())
@@ -966,7 +963,7 @@ protected:
 		return chunks[n/chunk_size] & (1<<(n&(chunk_size-1)));
 	}
 	
-	static constexpr void set(chunk_t * chunks, size_t n, bool val)
+	static forceinline constexpr void set(chunk_t * chunks, size_t n, bool val)
 	{
 		if (!std::is_constant_evaluated())
 		{
@@ -1018,6 +1015,7 @@ protected:
 	
 	template<size_t size>
 	friend class bitset;
+	friend class bitset_ref;
 	
 	
 	// unused but allocated bits must, at all points, be clear
@@ -1039,14 +1037,13 @@ protected:
 	}
 	
 	class reference {
-		bitarray* parent;
+		chunk_t* bits;
 		size_t index;
-		reference(bitarray* parent, size_t index) : parent(parent), index(index) {}
 	public:
-		friend class bitarray;
+		constexpr reference(chunk_t* bits, size_t index) : bits(bits), index(index) {}
 		
-		operator bool() const { return parent->get(index); }
-		reference& operator=(bool val) { parent->set(index, val); return *this; }
+		constexpr operator bool() const { return bitarray::get(bits, index); }
+		constexpr reference& operator=(bool val) { bitarray::set(bits, index, val); return *this; }
 	};
 	
 	//does not resize
@@ -1061,18 +1058,18 @@ protected:
 public:
 	// it's usually easier to call operator[] than these two,
 	// but in an unoptimized build, tossing around those reference objects can take noticable time
-	bool get(size_t n) const
+	forceinline bool get(size_t n) const
 	{
 		return get(bits(), n);
 	}
 	
-	void set(size_t n, bool val)
+	forceinline void set(size_t n, bool val)
 	{
 		set(bits(), n, val);
 	}
 	
 	bool operator[](size_t n) const { return get(n); }
-	reference operator[](size_t n) { return { this, n }; }
+	reference operator[](size_t n) { return { bits(), n }; }
 	
 	bool get_or(size_t n, bool def) const
 	{
@@ -1219,27 +1216,16 @@ protected:
 	
 	chunk_t bits[bitarray::n_chunks_for(nbits)] = {};
 	
-	class reference {
-		bitset& parent;
-		size_t index;
-		
-		constexpr reference(bitset& parent, size_t index) : parent(parent), index(index) {}
-		friend class bitset;
-	public:
-		constexpr operator bool() const { return parent.get(index); }
-		constexpr reference& operator=(bool val) { parent.set(index, val); return *this; }
-		
-	};
-	friend class reference;
+	friend class bitset_ref;
 	
 public:
 	// it's usually easier to call operator[] than these two,
 	// but in an unoptimized build, tossing around those reference objects can take noticable time
-	constexpr bool get(size_t n) const
+	forceinline constexpr bool get(size_t n) const
 	{
 		return bitarray::get(bits, n);
 	}
-	constexpr void set(size_t n, bool val)
+	forceinline constexpr void set(size_t n, bool val)
 	{
 		bitarray::set(bits, n, val);
 	}
@@ -1247,7 +1233,7 @@ public:
 	constexpr size_t size() const { return nbits; }
 	
 	constexpr bool operator[](size_t n) const { return get(n); }
-	constexpr reference operator[](size_t n) { return { *this, n }; }
+	constexpr bitarray::reference operator[](size_t n) { return { bits, n }; }
 	
 	constexpr bitset& operator|=(const bitset& other)
 	{
@@ -1260,6 +1246,13 @@ public:
 		bitset ret;
 		for (size_t i=0;i<ARRAY_SIZE(bits);i++)
 			ret.bits[i] = bits[i] & other.bits[i];
+		return ret;
+	}
+	constexpr bitset operator|(const bitset& other) const
+	{
+		bitset ret;
+		for (size_t i=0;i<ARRAY_SIZE(bits);i++)
+			ret.bits[i] = bits[i] | other.bits[i];
 		return ret;
 	}
 	constexpr bool operator==(const bitset& other) const
@@ -1320,6 +1313,35 @@ public:
 		ret.has = bitarray::next_true(bits, nbits, 0, ret.pos);
 		return ret;
 	}
+};
+
+class bitset_ref {
+	using chunk_t = uint32_t;
+	static const size_t chunk_size = sizeof(chunk_t)*8;
+	
+	chunk_t* bits;
+	size_t nbits;
+	
+public:
+	bitset_ref() { nbits=0; }
+	bitset_ref(bitarray& rhs) { operator=(rhs); }
+	template<size_t N> bitset_ref(bitset<N>& rhs) { operator=(rhs); }
+	bitset_ref& operator=(bitarray& rhs) { bits = rhs.bits(); nbits = rhs.nbits; return *this; }
+	template<size_t N> bitset_ref& operator=(bitset<N>& rhs) { bits = rhs.bits; nbits = N; return *this; }
+	
+	bool get(size_t n) const
+	{
+		return bitarray::get(bits, n);
+	}
+	void set(size_t n, bool val)
+	{
+		bitarray::set(bits, n, val);
+	}
+	
+	size_t size() const { return nbits; }
+	
+	bool operator[](size_t n) const { return get(n); }
+	bitarray::reference operator[](size_t n) { return { bits, nbits }; }
 };
 
 

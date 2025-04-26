@@ -13,7 +13,7 @@ string smelly_string::ucs1_to_utf8(arrayview<uint8_t> ucs1)
 	ret.resize(ucs1.size()*2);
 	uint8_t* out_start = ret.ptr();
 	uint8_t* out = out_start;
-	size_t n=0;
+	size_t n = 0;
 	while (n < ucs1.size())
 	{
 #ifdef __SSE2__
@@ -75,14 +75,8 @@ string smelly_string::utf16_to_utf8(arrayview<uint16_t> utf16)
 
 string smelly_string::utf16l_to_utf8(arrayview<uint8_t> utf16)
 {
-	if (END_LITTLE)
-	{
-		return utf16_to_utf8(arrayview<uint16_t>((uint16_t*)utf16.ptr(), utf16.size()/2));
-	}
-	else
-	{
-		abort(); // todo
-	}
+	static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__); // todo
+	return utf16_to_utf8(arrayview<uint16_t>((uint16_t*)utf16.ptr(), utf16.size()/2));
 }
 
 #ifdef _WIN32

@@ -52,7 +52,7 @@ inline size_t tostring_len(unsigned int val)   { return tostring_len((unsigned l
 inline size_t tostring_len(  signed long val)  { return tostring_len((  signed long long)val); } // max 20 (-9223372036854775808)
 inline size_t tostring_len(unsigned long val)  { return tostring_len((unsigned long long)val); } // max 20 (18446744073709551615)
 
-inline size_t tostring_len(bool val) { return 5-val; } // 5 or 4
+inline size_t tostring_len(bool val) { return val ? 4 : 5; }
 inline size_t tostring_len(const char * val) { return strlen(val); }
 inline size_t tostring_len(cstring val) { return val.length(); }
 
@@ -89,12 +89,12 @@ inline size_t tostring_ptr(char* buf, double val, size_t len) { return tostring_
 template<typename T> struct fmt_pad_t { T v; size_t n; fmt_pad_t(T v, size_t n) : v(v), n(n) {} };
 template<typename T> size_t tostring_len(fmt_pad_t<T> val) { return val.n; }
 template<typename T> size_t tostring_ptr(char* buf, fmt_pad_t<T> val, size_t len) { return tostring_ptr(buf, val.v, val.n); }
-template<size_t len, typename T> std::enable_if_t<std::is_unsigned_v<T>, fmt_pad_t<T>> fmt_pad(T in) { return { in, len }; }
+template<size_t len, typename T> fmt_pad_t<T> fmt_pad(T in) requires std::is_unsigned_v<T> { return { in, len }; }
 
 template<typename T> struct fmt_hex_t { T v; size_t n; fmt_hex_t(T v, size_t n) : v(v), n(n) {} };
 template<typename T> size_t tostring_len(fmt_hex_t<T> val) { return val.n; }
 template<typename T> size_t tostring_ptr(char* buf, fmt_hex_t<T> val, size_t len) { return tostringhex_ptr(buf, val.v, val.n); }
-template<size_t len = 0, typename T> std::enable_if_t<std::is_unsigned_v<T>, fmt_hex_t<T>> fmt_hex(T in) { return { in, len ? len : sizeof(T)*2 }; }
+template<size_t len = 0, typename T> fmt_hex_t<T> fmt_hex(T in) requires std::is_unsigned_v<T> { return { in, len ? len : sizeof(T)*2 }; }
 
 template<typename... Ts> forceinline string format(const Ts&... args)
 {

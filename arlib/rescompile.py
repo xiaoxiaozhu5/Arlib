@@ -28,10 +28,10 @@ asm = ""
 
 if use_incbin:
 	body += r"""
-#  define ASM_DATA(text) __asm__(".data\n" text ".text\n")
+#  define ASM_DATA(text) __asm__(".data\n" text ".previous\n")
 #if defined(__unix__)
 #  define ASM_RODATA(text) \
-     __asm__(".section .rodata,\"a\",@progbits\n" text ".text\n")
+     __asm__(".section .rodata,\"a\",@progbits\n" text ".previous\n")
 #  define ASM_LABEL(varname, size) \
      ".globl " varname "\n" \
      ".size " varname ", " STR(size) "\n" \
@@ -39,7 +39,7 @@ if use_incbin:
      varname ":\n"
 #endif
 #if defined(_WIN32)
-#  define ASM_RODATA(text) __asm__(".section .rdata,\"dr\"\n" text ".text\n")
+#  define ASM_RODATA(text) __asm__(".section .rdata,\"dr\"\n" text ".previous\n")
 #  if defined(__i386__)
 #    define ASM_LABEL(varname, size) "_" varname ":\n"
 #  else

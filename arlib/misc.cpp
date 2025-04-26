@@ -56,7 +56,7 @@ T load_small(const uint8_t * ptr, size_t len)
 		// like memmem.cpp load_sse2_small_highundef, Valgrind does not like the below one
 		T ret = 0;
 		memcpy(&ret, ptr, len);
-#if END_BIG
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 		if (len == 0)
 			return 0;
 		ret >>= (sizeof(T)-len)*8;
@@ -71,7 +71,7 @@ T load_small(const uint8_t * ptr, size_t len)
 		// but extending downwards is safe, so do that
 		T ret;
 		memcpy(&ret, ptr-sizeof(T)+len, sizeof(T));
-#if END_LITTLE
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 		ret >>= (sizeof(T)-len)*8;
 #else
 		ret &= ~(((T)-2) << (len*8-1)); // extra -1 on shift, and -2 on lhs, to avoid trouble if len == sizeof
@@ -84,7 +84,7 @@ T load_small(const uint8_t * ptr, size_t len)
 		// (in both cases, alignment is required)
 		T ret;
 		memcpy(&ret, ptr, sizeof(T));
-#if END_LITTLE
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 		ret &= ~(((T)-2) << (len*8-1));
 #else
 		ret >>= (sizeof(T)-len)*8;
@@ -399,7 +399,7 @@ test("endian", "", "")
 {
 	union { uint8_t a[2]; uint16_t b; } c;
 	c.b = 0x0100;
-	assert_eq(c.a[0], END_BIG);
+	assert_eq(c.a[0], (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__));
 }
 
 test("array_size", "", "")
@@ -449,7 +449,7 @@ test("load_small", "", "")
 		{
 			uint32_t expect;
 			memcpy(&expect, bytes, sizeof(uint32_t));
-			if (END_BIG)
+			if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 				expect >>= (sizeof(uint32_t)-len)*8;
 			assert_eq(load_small<uint32_t>(ptr, len), expect);
 		}

@@ -269,26 +269,26 @@ void pe_do_relocs(ntdll_t* ntdll, HMODULE mod)
 // to do this, group up the safe ones in the ctor table, with labels around the safe subsection
 #ifdef __i386__
 __asm__(R"(
-.section .ctors.arlibstatic1,"dr"
+.pushsection .ctors.arlibstatic1,"dr"
 _init_last:
 .long _arlib_hybrid_exe_init  # this one must be "last" (.ctors is processed backwards)
 
 .section .ctors.arlibstatic9,"dr"
 _init_first:
 
-.text
+.popsection
 )");
 #endif
 #ifdef __x86_64__
 __asm__(R"(
-.section .ctors.arlibstatic1,"dr"
+.pushsection .ctors.arlibstatic1,"dr"
 init_last:
 .quad arlib_hybrid_exe_init  # this one must be "last" (.ctors is processed backwards)
 
 .section .ctors.arlibstatic9,"dr"
 init_first:
 
-.text
+.popsection
 )");
 #endif
 

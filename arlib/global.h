@@ -32,6 +32,7 @@ clang: error: unknown argument: '-fcoroutines'
 #else
 #warning "unknown or unsupported compiler; feel free to try, but no complaining if it breaks"
 #endif
+#include "msvc-intrin.h"
 
 // these shouldn't be needed with modern compilers, according to
 // https://stackoverflow.com/questions/8132399/how-to-printf-uint64-t-fails-with-spurious-trailing-in-format
@@ -174,6 +175,7 @@ defer_holder<T> dtor(T&& f)
 #define UNLIKELY(expr)  (expr)
 #define MAYBE_UNUSED
 #define KEEP_OBJECT
+#define forceinline inline
 #endif
 
 #ifndef __has_builtin
@@ -283,7 +285,7 @@ template<> struct static_assert_t<false> {};
 class anyptr {
 	void* data;
 public:
-	anyptr(nullptr_t) { data = NULL; }
+	anyptr(nullptr_t) { data = nullptr; }
 	template<typename T> anyptr(T* data_) { data = (void*)data_; }
 	template<typename T> operator T*() { return (T*)data; }
 	template<typename T> operator const T*() const { return (const T*)data; }
@@ -322,7 +324,7 @@ void* malloc(size_t) __attribute__((deprecated("use xmalloc or try_malloc instea
 
 void* xrealloc_inner(void* ptr, size_t size);
 inline anyptr xrealloc(void* ptr, size_t size) { return xrealloc_inner(ptr, size); }
-inline anyptr try_realloc(void* ptr, size_t size) { if ((void*)ptr) _test_free(); if (size) _test_malloc(); return realloc(ptr, size); }
+inline anyptr try_realloc(void* ptr, size_t size) { if (ptr) _test_free(); if (size) _test_malloc(); return realloc(ptr, size); }
 void* realloc(void*, size_t) __attribute__((deprecated("use xrealloc or try_realloc instead")));
 
 void* xcalloc_inner(size_t size, size_t count);
@@ -612,8 +614,8 @@ class variant_idx {
 	char state_id() const { return buf[0]; }
 	template<typename T> T* buf_for() { return (T*)(buf+alignof(T)); }
 	template<typename T> const T* buf_for() const { return (T*)(buf+alignof(T)); }
-	template<char idx> type_for<idx>* buf_for_idx() { return buf_for<type_for<idx>>();; }
-	template<char idx> const type_for<idx>* buf_for_idx() const { return buf_for<type_for<idx>>();; }
+	template<char idx> type_for<idx>* buf_for_idx() { return buf_for<type_for<idx>>(); }
+	template<char idx> const type_for<idx>* buf_for_idx() const { return buf_for<type_for<idx>>(); }
 	
 	
 	template<char idx>
@@ -801,7 +803,7 @@ public:
 //if an object should contain callbacks that can destroy the object, you should use the macros below these classes
 class destructible {
 	friend class destructible_lock;
-	bool* pb = NULL;
+	bool* pb = nullptr;
 public:
 	~destructible() { if (pb) *pb = true; }
 };
@@ -1163,9 +1165,9 @@ class range_iter_t {
 	size_t step;
 public:
 	range_iter_t(size_t n, size_t step) : n(n), step(step) {}
-	forceinline bool operator!=(const range_iter_t& other) { return n < other.n; }
+	forceinline bool operator!=(const range_iter_t& other) const { return n < other.n; }
 	forceinline void operator++() { n += step; }
-	forceinline size_t operator*() { return n; }
+	forceinline size_t operator*() const { return n; }
 };
 class range_t {
 	size_t start;

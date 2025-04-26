@@ -20,6 +20,17 @@ public:
 	size_t hash() const { return id >> 16; }
 };
 
+class comparer_counter {
+public:
+	static size_t compares;
+	size_t val;
+	comparer_counter(size_t val) : val(val) {}
+	
+	bool operator==(const comparer_counter& other) const { compares++; return val == other.val; }
+	size_t hash() const { return val; }
+};
+size_t comparer_counter::compares;
+
 test("set", "array,string", "set")
 {
 	{
@@ -254,6 +265,28 @@ test("set", "array,string", "set")
 		assert(b.contains(custom_hash(1)));
 		assert(!b.contains(custom_hash(2)));
 		assert(b.contains(custom_hash(3)));
+	}
+	
+	{
+		set<comparer_counter> a;
+		for (int i=0;i<4096+256;i++) // stay 256 elems away from the rehash thresholds
+			a.add(i);
+		comparer_counter::compares = 0;
+		for (int i=4096+256;i<8192-256;i++)
+			a.add(i);
+		//printf("%zu\n", comparer_counter::compares);
+		assert_lt(comparer_counter::compares, (4096-512)*1.5); // 2925 with good hash and shuffle
+	}
+	
+	{
+		// ensure it uses the entire input, not just the low half
+		set<comparer_counter> a;
+		for (int i=0;i<4096+256;i++)
+			a.add(__builtin_bswap64(i));
+		comparer_counter::compares = 0;
+		for (uint64_t i=4096+256;i<8192-256;i++)
+			a.add(__builtin_bswap64(i));
+		assert_lt(comparer_counter::compares, (4096-512)*1.5);
 	}
 }
 

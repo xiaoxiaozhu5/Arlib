@@ -23,105 +23,19 @@
 #define ZIP_STRICT 0
 #endif
 
-static inline uint16_t end_swap(uint16_t n) { return __builtin_bswap16(n); }
-static inline uint32_t end_swap(uint32_t n) { return __builtin_bswap32(n); }
-
-//Given class U, where U supports operator T() and operator=(T), intwrap<U> enables all the integer operators.
-//Most are already supported by casting to the integer type, but this one adds the assignment operators too.
-template<typename U, typename T = U> class intwrap : public U {
-	T get() { return *this; }
-	void set(T val) { this->U::operator=(val); }
-public:
-	//no operator T(), that goes to the parent
-	T operator++(int) { T r = get(); set(r+1); return r; }
-	T operator--(int) { T r = get(); set(r-1); return r; }
-	intwrap<U,T>& operator++() { set(get()+1); return *this; }
-	intwrap<U,T>& operator--() { set(get()-1); return *this; }
-	//intwrap<U,T>& operator  =(const T i) { set(        i); return *this; } // can't really implement this in terms of itself
-	intwrap<U,T>& operator +=(const T i) { set(get() + i); return *this; }
-	intwrap<U,T>& operator -=(const T i) { set(get() - i); return *this; }
-	intwrap<U,T>& operator *=(const T i) { set(get() * i); return *this; }
-	intwrap<U,T>& operator /=(const T i) { set(get() / i); return *this; }
-	intwrap<U,T>& operator %=(const T i) { set(get() % i); return *this; }
-	intwrap<U,T>& operator &=(const T i) { set(get() & i); return *this; }
-	intwrap<U,T>& operator |=(const T i) { set(get() | i); return *this; }
-	intwrap<U,T>& operator ^=(const T i) { set(get() ^ i); return *this; }
-	intwrap<U,T>& operator<<=(const T i) { set(get()<< i); return *this; }
-	intwrap<U,T>& operator>>=(const T i) { set(get()>> i); return *this; }
-	
-	intwrap() {}
-	intwrap(T i) { set(i); }
-	template<typename T1> intwrap(T1 v1) : U(v1) {}
-	template<typename T1, typename T2> intwrap(T1 v1, T2 v2) : U(v1, v2) {}
-	template<typename T1, typename T2, typename T3> intwrap(T1 v1, T2 v2, T3 v3) : U(v1, v2, v3) {}
-};
-
-template<typename T> struct int_inherit_core {
-	T item;
-	operator T() { return item; }
-	void operator=(T newval) { item=newval; }
-	int_inherit_core(T item) : item(item) {}
-};
-//This allows inheriting from something that acts like a plain int.
-//Why doesn't raw C++ allow that? Would it cause too much pains with people creating unsigned iostreams?
-template<typename T> class int_inherit : public intwrap<int_inherit_core<T> > {
-	int_inherit(T item) : intwrap<int_inherit_core<T> >(item) {}
-};
-
-//this one is usually used to represent various on-disk or on-wire structures, which aren't necessarily properly aligned
-//it's a performance penalty, but if that's significant, the data should be converted to native types
-#ifdef _MSC_VER
-#pragma pack(push,1)
-#endif
-template<typename T, bool little> class endian_core
+template<typename T> class litend
 {
-	T val;
+	uint8_t buf[sizeof(T)];
 	
 public:
-	endian_core() : val(0) {}
-	endian_core(T val) : val(val) {}
-	endian_core(arrayview<uint8_t> bytes)
-	{
-		static_assert(sizeof(endian_core) == sizeof(T));
-		
-		// these 'this' should be &val, but that makes Clang throw warnings about misaligned pointers
-		memcpy(this, bytes.ptr(), sizeof(val));
-	}
-	arrayvieww<uint8_t> bytes() { return arrayvieww<uint8_t>((uint8_t*)this, sizeof(val)); }
-	arrayview<uint8_t> bytes() const { return arrayview<uint8_t>((uint8_t*)this, sizeof(val)); }
+	litend() { memset(buf, 0, sizeof(buf)); }
+	litend(T val) { writeu_le<T>(buf, val); }
+	litend(arrayview<uint8_t> bytes) { memcpy(buf, bytes.ptr(), sizeof(T)); }
+	arrayvieww<uint8_t> bytes() { return buf; }
+	arrayview<uint8_t> bytes() const { return buf; }
 	
-	operator T() const
-	{
-		if (little == END_LITTLE) return val;
-		else return end_swap(val);
-	}
-	
-	void operator=(T newval)
-	{
-		if (little == END_LITTLE) val = newval;
-		else val = end_swap(newval);
-	}
-}
-#ifdef __GNUC__
-__attribute__((__packed__))
-#endif
-;
-#ifdef _MSC_VER
-#pragma pack(pop)
-#endif
-
-template<typename T> class bigend : public intwrap<endian_core<T, false>, T> {
-public:
-	bigend() {}
-	bigend(T i) : intwrap<endian_core<T, false>, T>(i) {} // why does C++ need so much irritating cruft
-	bigend(arrayview<uint8_t> b) : intwrap<endian_core<T, false>, T>(b) {}
-};
-
-template<typename T> class litend : public intwrap<endian_core<T, true>, T> {
-public:
-	litend() {}
-	litend(T i) : intwrap<endian_core<T, true>, T>(i) {}
-	litend(arrayview<uint8_t> b) : intwrap<endian_core<T, true>, T>(b) {}
+	operator T() const { return readu_le<T>(buf); }
+	void operator=(T newval) { writeu_le<T>(buf, newval); }
 };
 
 

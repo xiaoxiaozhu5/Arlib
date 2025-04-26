@@ -171,9 +171,13 @@ static string statx_prefix;
 
 static void statx_parse_time(cstring str, struct statx_timestamp * out)
 {
-	array<cstring> parts = str.csplit<1>(".");
-	fromstring(parts[0], out->tv_sec);
-	fromstring((parts[1]+"000000000").substr(0, 9), out->tv_nsec);
+	// statx_timestamp is s64+u32, timespec is time_t+long
+	// I could cast it, but time_t is 32bit on old 32bit systems, and the padding is on different sides on big endian
+	// not worth the effort
+	timestamp t;
+	fromstring(str, t);
+	out->tv_sec = t.sec;
+	out->tv_nsec = t.nsec;
 }
 
 static void statx_cache_create(cstring path, cstring local, cstring remote_addr)
@@ -188,7 +192,7 @@ static void statx_cache_create(cstring path, cstring local, cstring remote_addr)
 		remote_dir = "/"+path.substr(local.length(), ~0);
 	else
 		return;
-	FILE* f = popen("ssh "+remote_addr+" find '"+remote_dir.replace(">","\\>")+"' -printf '%y:%s:%T@:%C@:%B@:%p\\\\n'", "r");
+	FILE* f = popen("ssh "+remote_addr+" find '"+remote_dir.replace(">","\\>")+"' -printf '%y:%s:%T@:%C@:%B@:%p\\\\n' </dev/null", "r");
 	char line[8192];
 	while (true)
 	{
